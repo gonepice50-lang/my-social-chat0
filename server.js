@@ -70,5 +70,8 @@ io.on('connection', (socket) => {
         io.emit('user_offline', socket.username);
     });
 });
-
-server.listen(3000, () => console.log('السيرفر يعمل: http://localhost:3000'));
+// استبدل سطر server.listen القديم بهذا
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+});
