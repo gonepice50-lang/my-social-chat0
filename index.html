@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>Social Chat Pro</title>
+    <style>
+        :root { --primary: #0084ff; --bg: #18191a; --panel: #242526; --text: #e4e6eb; }
+        body { margin: 0; font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); overflow: hidden; }
+        
+        #auth-box { height: 100vh; display: flex; align-items: center; justify-content: center; background: #000; }
+        .form { background: var(--panel); padding: 30px; border-radius: 12px; width: 350px; text-align: center; }
+        input { width: 90%; padding: 12px; margin: 8px 0; border-radius: 8px; border: 1px solid #3e4042; background: #3a3b3c; color: white; }
+        button { width: 90%; padding: 12px; background: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+
+        #app { display: none; height: 100vh; }
+        #sidebar { width: 300px; background: var(--panel); border-left: 1px solid #3e4042; display: flex; flex-direction: column; }
+        #search-box { padding: 15px; }
+        #user-list { flex: 1; overflow-y: auto; }
+        .user-card { padding: 15px; border-bottom: 1px solid #3e4042; cursor: pointer; display: flex; align-items: center; justify-content: space-between; }
+        .user-card:hover { background: #3a3b3c; }
+        .status { width: 10px; height: 10px; border-radius: 50%; background: gray; }
+        .online { background: #45bd62; }
+
+        #chat-main { flex: 1; display: flex; flex-direction: column; }
+        #messages { flex: 1; padding: 20px; overflow-y: auto; background: var(--bg); display: flex; flex-direction: column; }
+        .msg { max-width: 60%; padding: 10px; margin: 5px; border-radius: 15px; font-size: 15px; }
+        .sent { background: var(--primary); align-self: flex-start; }
+        .received { background: #3a3b3c; align-self: flex-end; }
+        #input-area { padding: 20px; background: var(--panel); display: flex; gap: 10px; }
+    </style>
+</head>
+<body>
+
+<div id="auth-box">
+    <div class="form" id="reg-form">
+        <h2>إنشاء حساب</h2>
+        <input type="text" id="reg-user" placeholder="اسم المستخدم">
+        <input type="text" id="reg-name" placeholder="الاسم الكامل">
+        <input type="password" id="reg-pass" placeholder="كلمة المرور">
+        <button onclick="register()">إنشاء الحساب</button>
+        <p onclick="toggleAuth()" style="cursor:pointer; font-size:12px; margin-top:15px">لديك حساب؟ سجل دخولك</p>
+    </div>
+    <div class="form" id="login-form" style="display:none">
+        <h2>تسجيل الدخول</h2>
+        <input type="text" id="log-user" placeholder="اسم المستخدم">
+        <input type="password" id="log-pass" placeholder="كلمة المرور">
+        <button onclick="login()">دخول</button>
+        <p onclick="toggleAuth()" style="cursor:pointer; font-size:12px; margin-top:15px">ليس لديك حساب؟ سجل الآن</p>
+    </div>
+</div>
+
+<div id="app">
+    <div id="sidebar">
+        <div id="search-box">
+            <input type="text" id="search" placeholder="بحث عن أشخاص..." oninput="filterUsers()">
+        </div>
+        <div id="user-list"></div>
+    </div>
+    <div id="chat-main">
+        <div id="chat-header" style="padding:15px; background:var(--panel); font-weight:bold">اختر صديقاً للمراسلة</div>
+        <div id="messages"></div>
+        <div id="input-area">
+            <input type="text" id="msg-in" placeholder="اكتب رسالة...">
+            <button onclick="sendMsg()" style="width:60px">✈️</button>
+        </div>
+    </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+    const socket = io();
+    let me = "", target = "", allUsers = [];
+
+    function toggleAuth() {
+        document.getElementById('reg-form').style.display = document.getElementById('reg-form').style.display === 'none' ? 'block' : 'none';
+        document.getElementById('login-form').style.display = document.getElementById('login-form').style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function register() {
+        const body = { 
+            username: document.getElementById('reg-user').value,
+            fullName: document.getElementById('reg-name').value,
+            password: document.getElementById('reg-pass').value 
+        };
+        const res = await fetch('/register', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+        const data = await res.json();
+        alert(data.message || "تم التسجيل بنجاح!");
+        if(data.success) toggleAuth();
+    }
+
+    async function login() {
+        const body = { username: document.getElementById('log-user').value, password: document.getElementById('log-pass').value };
+        const res = await fetch('/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+        const data = await res.json();
+        if(data.success) {
+            me = data.user.username;
+            document.getElementById('auth-box').style.display = 'none';
+            document.getElementById('app').style.display = 'flex';
+            socket.emit('go_online', me);
+        } else alert(data.message);
+    }
+
+    socket.on('all_users', (users) => {
+        allUsers = users;
+        renderUsers(users);
+    });
+
+    function renderUsers(list) {
+        const container = document.getElementById('user-list');
+        container.innerHTML = list.filter(u => u.username !== me).map(u => `
+            <div class="user-card" onclick="startChat('${u.username}')">
+                <div>
+                    <b>${u.fullName}</b><br><small>@${u.username}</small>
+                </div>
+                <div class="status ${u.isOnline ? 'online' : ''}"></div>
+            </div>
+        `).join('');
+    }
+
+    function filterUsers() {
+        const query = document.getElementById('search').value.toLowerCase();
+        renderUsers(allUsers.filter(u => u.fullName.toLowerCase().includes(query) || u.username.includes(query)));
+    }
+
+    function startChat(username) {
+        target = username;
+        document.getElementById('chat-header').innerText = "الدردشة مع: " + username;
+        document.getElementById('messages').innerHTML = "";
+    }
+
+    function sendMsg() {
+        const text = document.getElementById('msg-in').value;
+        if(text && target) {
+            socket.emit('send_msg', { to: target, text });
+            appendMsg(text, 'sent');
+            document.getElementById('msg-in').value = "";
+        }
+    }
+
+    socket.on('new_msg', (data) => {
+        if(data.from === target) appendMsg(data.text, 'received');
+        else alert(`رسالة جديدة من ${data.from}`);
+    });
+
+    function appendMsg(text, type) {
+        const div = document.createElement('div');
+        div.className = `msg ${type}`;
+        div.innerText = text;
+        document.getElementById('messages').appendChild(div);
+        document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+    }
+</script>
+</body>
+</html>
